@@ -122,6 +122,20 @@ public class DualSenseBridgeActivity extends AppCompatActivity {
         TextView beta = pill("BETA");
         root.addView(beta, wrapStart());
 
+        // This screen only drives an external USB adapter. Point users whose
+        // controller is paired in Android Bluetooth settings to the right place.
+        LinearLayout directCard = card();
+        TextView directTitle = text("Controller paired in Android Bluetooth?", 15, Color.WHITE);
+        directTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        directCard.addView(directTitle);
+        directCard.addView(text("This screen only manages an external USB Bluetooth adapter. " +
+                "Direct mode (Android 12+) needs no setup; test it here without starting a stream.",
+                12, TEXT_SECONDARY));
+        directCard.addView(actionButton("Open direct Bluetooth debug", true, v ->
+                startActivity(new android.content.Intent(this, DualSenseDebugActivity.class))),
+                match(dp(6)));
+        root.addView(directCard, match(dp(6)));
+
         LinearLayout connection = card();
         LinearLayout stateRow = horizontal();
         stateRow.setGravity(Gravity.CENTER_VERTICAL);

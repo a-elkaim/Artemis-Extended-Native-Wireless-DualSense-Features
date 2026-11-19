@@ -30,6 +30,7 @@ import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.dualsense.DualSenseBridge;
+import com.limelight.dualsense.DirectDualSenseBt;
 import com.limelight.dualsense.DualSenseAudioBridge;
 import com.limelight.dualsense.DualSenseMicrophoneBridge;
 import com.limelight.binding.input.driver.DualSenseController;
@@ -619,6 +620,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         performanceOverlayBig = findViewById(R.id.performanceOverlayBig);
 
+        // Native DualSense touch needs ABSOLUTE pointer capture on Android 17+;
+        // keep relative capture when the user wants the touchpad as a mouse.
+        com.limelight.binding.input.capture.AndroidNativePointerCaptureProvider
+                .nativeDualSenseTouchAllowed = !prefConfig.gamepadTouchpadAsMouse;
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this, this);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1907,6 +1912,24 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             controllerConnectionOverlayView.setText(overlayText);
             controllerConnectionOverlayView.setTextColor(age >= 0 && age <= 250 ?
                     0xFFE8FFF0 : 0xFFFFD6D6);
+            controllerConnectionOverlayContainer.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        // Controller paired directly in Android Bluetooth settings (Android 12+).
+        // isConnected() is false while the USB dongle bridge owns the controller,
+        // so the bridge diagnostics below still apply in that case.
+        if (DirectDualSenseBt.isConnected(this)) {
+            int batteryPercent = DirectDualSenseBt.overlayBatteryPercent();
+            String battery = batteryPercent >= 0 ? "  ·  " + batteryPercent + "%" : "";
+            String overlayText = "DualSense Bluetooth (direct) " +
+                    getString(R.string.dualsense_diag_active) + battery +
+                    "\n" + DirectDualSenseBt.overlayDetails(this) +
+                    "\n\nAudio / HD haptics: " + DualSenseAudioBridge.diagnostics() +
+                    "\n\nMicrophone / stream: " + DualSenseMicrophoneBridge.diagnostics();
+            controllerConnectionLogClearView.setVisibility(View.GONE);
+            controllerConnectionOverlayView.setText(overlayText);
+            controllerConnectionOverlayView.setTextColor(0xFFE8FFF0);
             controllerConnectionOverlayContainer.setVisibility(View.VISIBLE);
             return;
         }

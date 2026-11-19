@@ -9,6 +9,11 @@ import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 
+import com.limelight.LimeLog;
+import com.limelight.dualsense.DirectDualSenseBt;
+
+import java.lang.reflect.Method;
+
 
 // We extend AndroidPointerIconCaptureProvider because we want to also get the
 // pointer icon hiding behavior over our stream view just in case pointer capture
@@ -26,6 +31,82 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
 
     public static boolean isCaptureProviderSupported() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O;
+    }
+
+    /**
+     * False when the user wants gamepad touchpads to drive the host mouse.
+     * Set by Game from the "touchpad as mouse" preference.
+     */
+    public static volatile boolean nativeDualSenseTouchAllowed = true;
+
+    // Android 17 (API 37) pointer-capture modes. The project compiles against
+    // API 36, so the mode constants and requestPointerCapture(int) are resolved
+    // reflectively and fall back to the classic relative capture.
+    private static final int API_POINTER_CAPTURE_MODES = 37;
+    private static Method requestCaptureWithMode;
+    private static int modeRelative = -1;
+    private static int modeAbsolute = -1;
+    private static boolean modeApiResolved;
+    private int requestedMode = -1;
+
+    private static synchronized boolean resolveModeApi() {
+        if (!modeApiResolved) {
+            modeApiResolved = true;
+            if (Build.VERSION.SDK_INT >= API_POINTER_CAPTURE_MODES) {
+                try {
+                    modeRelative = View.class.getField("POINTER_CAPTURE_MODE_RELATIVE").getInt(null);
+                    modeAbsolute = View.class.getField("POINTER_CAPTURE_MODE_ABSOLUTE").getInt(null);
+                    requestCaptureWithMode = View.class.getMethod("requestPointerCapture", int.class);
+                } catch (ReflectiveOperationException e) {
+                    LimeLog.warning("Pointer capture modes unavailable: " + e);
+                    requestCaptureWithMode = null;
+                }
+            }
+        }
+        return requestCaptureWithMode != null;
+    }
+
+    /**
+     * Android's gesture touchpad mapper only reports absolute finger positions
+     * (SOURCE_TOUCHPAD with X/Y ranges) under ABSOLUTE capture. In RELATIVE
+     * capture a DualSense touchpad is indistinguishable from mouse motion, so
+     * native DualSense touch could never reach the host.
+     */
+    private static boolean wantsAbsoluteCapture() {
+        if (!nativeDualSenseTouchAllowed) return false;
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device != null && DirectDualSenseBt.isBluetoothDualSenseInput(device) &&
+                    device.supportsSource(InputDevice.SOURCE_TOUCHPAD)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void requestCapture() {
+        if (resolveModeApi()) {
+            int mode = wantsAbsoluteCapture() ? modeAbsolute : modeRelative;
+            try {
+                requestCaptureWithMode.invoke(targetView, mode);
+                if (mode != requestedMode) {
+                    LimeLog.info("Pointer capture mode requested: " +
+                            (mode == modeAbsolute ? "ABSOLUTE (native DualSense touchpad)" : "RELATIVE"));
+                }
+                requestedMode = mode;
+                return;
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                LimeLog.warning("requestPointerCapture(mode) failed, using default: " + e);
+            }
+        }
+        targetView.requestPointerCapture();
+    }
+
+    /** True if capture is held but the wanted mode changed (DualSense came or went). */
+    private boolean captureModeOutdated() {
+        if (!resolveModeApi() || requestedMode < 0) return false;
+        int wanted = wantsAbsoluteCapture() ? modeAbsolute : modeRelative;
+        return wanted != requestedMode;
     }
 
     // We only capture the pointer if we have a compatible InputDevice
@@ -81,7 +162,7 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
 
         // Capture now if we have a capture-capable device
         if (hasCaptureCompatibleInputDevice()) {
-            targetView.requestPointerCapture();
+            requestCapture();
         }
     }
 
@@ -103,7 +184,7 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
             @Override
             public void run() {
                 if (hasCaptureCompatibleInputDevice()) {
-                    targetView.requestPointerCapture();
+                    requestCapture();
                 }
             }
         }, 500);
@@ -144,8 +225,9 @@ public class AndroidNativePointerCaptureProvider extends AndroidPointerIconCaptu
     @Override
     public void onInputDeviceAdded(int deviceId) {
         // Check if we've added a capture-compatible device
-        if (!targetView.hasPointerCapture() && hasCaptureCompatibleInputDevice()) {
-            targetView.requestPointerCapture();
+        if (hasCaptureCompatibleInputDevice() &&
+                (!targetView.hasPointerCapture() || (!isCursorVisible && captureModeOutdated()))) {
+            requestCapture();
         }
     }
 

@@ -254,7 +254,12 @@ object DirectDualSenseBt {
         // briefly publish an empty connected-device list while a stream starts,
         // even though the same controller remains usable. Only a successfully
         // parsed live report is authoritative for jack hotplug state.
-        val report = readInputReport() ?: return
+        val report = readInputReport()
+        if (report == null) {
+            snapshotFailures.incrementAndGet()
+            return
+        }
+        cacheSnapshot(report)
         val statusStart = if ((report[0].toInt() and 0xff) == 0x31) 54 else 55
         val statusEnd = minOf(report.size, statusStart + 3)
         val statusSignature = report.copyOfRange(statusStart, statusEnd)
@@ -291,6 +296,66 @@ object DirectDualSenseBt {
         val last = lastNativeAudioAtNs
         return audioRouteArmed && last != 0L &&
             SystemClock.elapsedRealtimeNanos() - last < NATIVE_AUDIO_ACTIVE_GRACE_NS
+    }
+
+    /**
+     * Snapshot of the HID-host transport for the debug screen. Binds the HID
+     * proxy lazily (same as [isDirectHidConnected]) so it works without a stream.
+     */
+    @JvmStatic fun debugStatus(context: Context): DirectDualSenseBtHidBridge.Status? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val active = bridge ?: return null
+        val granted = permissionGranted(context)
+        if (granted && !active.getStatus(true).proxyReady) active.start()
+        return active.getStatus(granted)
+    }
+
+    @JvmStatic fun debugFullLog(): String = bridge?.getFullLogText() ?: ""
+
+    // ---- In-stream diagnostics overlay (Game connection overlay) ----
+    @Volatile private var lastSnapshotAtMs = 0L
+    @Volatile private var lastBatteryPercent = -1
+    @Volatile private var lastBatteryStatus = ""
+    private val snapshotFailures = AtomicInteger(0)
+    @Volatile private var lastTransportSummary = ""
+    @Volatile private var lastTransportSummaryAtMs = 0L
+
+    private fun cacheSnapshot(report: ByteArray) {
+        lastSnapshotAtMs = SystemClock.elapsedRealtime()
+        val normalized = if ((report[0].toInt() and 0xff) == 0x31) {
+            byteArrayOf(0xa1.toByte()) + report
+        } else report
+        runCatching { com.example.usbbtonandroid.DualSenseInputParser.parse(normalized) }
+            .getOrNull()?.let {
+                if (it.batteryPercent >= 0) lastBatteryPercent = it.batteryPercent
+                lastBatteryStatus = it.batteryStatus
+            }
+    }
+
+    /** Battery from the latest periodic input snapshot, or -1 if unknown. */
+    @JvmStatic fun overlayBatteryPercent(): Int = lastBatteryPercent
+
+    /**
+     * Detail lines for the in-stream connection overlay when the controller is
+     * connected directly through Android Bluetooth (no dongle bridge, no USB).
+     */
+    @JvmStatic fun overlayDetails(context: Context): String {
+        val status = bridge?.getStatus(permissionGranted(context))
+        val now = SystemClock.elapsedRealtime()
+        val snapshotAge = if (lastSnapshotAtMs == 0L) "never" else "${now - lastSnapshotAtMs} ms"
+        val sb = StringBuilder()
+        sb.append("Device: ").append(status?.connectedDeviceName ?: "unknown")
+        sb.append("\nStatus snapshot age ").append(snapshotAge)
+            .append("  ·  snapshot timeouts ").append(snapshotFailures.get())
+        if (lastBatteryStatus.isNotEmpty()) sb.append("  ·  ").append(lastBatteryStatus)
+        sb.append("\nOutput: ").append(status?.lastSendStatus ?: "no report sent yet")
+        status?.lastError?.let { sb.append("  ·  last error: ").append(it) }
+        sb.append("\nAudio route: ").append(if (headsetRoute) "headset jack" else "controller speaker")
+            .append("  ·  native audio ").append(if (isNativeAudioActive()) "active" else "idle")
+        if (lastTransportSummary.isNotEmpty() && now - lastTransportSummaryAtMs < 10_000L) {
+            sb.append("\nBT audio transport (2 s): ").append(lastTransportSummary)
+        }
+        return sb.toString()
     }
 
     /** Read the current complete Bluetooth input snapshot (report 0x31). */
@@ -627,6 +692,9 @@ object DirectDualSenseBt {
         val sent = audioSentWindow
         val received = audioReceivedWindow.getAndSet(0)
         val averageUs = if (sent == 0) 0L else audioSendTimeWindowNs / sent / 1_000L
+        lastTransportSummary = "received=$received sent=$sent failed=$audioFailedWindow " +
+            "slow5ms=$audioSlowWindow avgSendUs=$averageUs maxSendUs=${audioMaxSendTimeWindowNs / 1_000L}"
+        lastTransportSummaryAtMs = SystemClock.elapsedRealtime()
         LimeLog.info("Direct DualSense BT transport: received=$received " +
             "overwritten=${audioOverwrittenWindow.getAndSet(0)} sent=$sent failed=$audioFailedWindow " +
             "profile=ABSOLUTE_GRID latency=0x${AUDIO_LATENCY_SCALE.toString(16)} " +

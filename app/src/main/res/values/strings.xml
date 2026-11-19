@@ -913,6 +913,7 @@
     <string name="title_checkbox_full_screen">Enable Full Screen</string>
     <string name="summary_checkbox_full_screen">Hide system bars with immersive mode</string>
     <string name="dualsense_bridge_title">DualSense USB Bluetooth Bridge</string>
+    <string name="dualsense_debug_title">DualSense Debug (Direct Bluetooth)</string>
     <string name="dualsense_bridge_button">DualSense Bridge • BETA</string>
     <string name="dualsense_bridge_alpha">BETA — stable connection path under active development</string>
     <string name="dualsense_bridge_scan">Find / rescan adapter</string>

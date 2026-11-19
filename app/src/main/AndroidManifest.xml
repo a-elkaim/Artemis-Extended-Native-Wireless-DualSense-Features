@@ -66,6 +66,13 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize"
             android:screenOrientation="unspecified" />
 
+        <activity
+            android:name=".DualSenseDebugActivity"
+            android:exported="false"
+            android:label="@string/dualsense_debug_title"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:screenOrientation="unspecified" />
+
         <provider
             android:name=".PosterContentProvider"
             android:authorities="poster.${applicationId}"

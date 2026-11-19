@@ -194,6 +194,11 @@ public class PcView extends AppCompatActivity implements AdapterFragmentCallback
         if (dualSenseBridgeButton != null) {
             dualSenseBridgeButton.setOnClickListener(v ->
                     startActivity(new Intent(PcView.this, DualSenseBridgeActivity.class)));
+            // Long-press jumps straight to the direct-Bluetooth debug bench.
+            dualSenseBridgeButton.setOnLongClickListener(v -> {
+                startActivity(new Intent(PcView.this, DualSenseDebugActivity.class));
+                return true;
+            });
         }
 
         // Amazon review didn't like the help button because the wiki was not entirely

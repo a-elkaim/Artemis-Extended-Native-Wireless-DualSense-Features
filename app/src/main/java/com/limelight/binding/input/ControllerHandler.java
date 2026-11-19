@@ -3444,6 +3444,15 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             return false;
         }
 
+        // On Android 17+ the absolute touchpad ranges only exist once ABSOLUTE
+        // pointer capture is active, which can be after this context was built.
+        if ((context.touchpadXRange == null || context.touchpadYRange == null) &&
+                eventDevice != null) {
+            context.touchpadXRange = eventDevice.getMotionRange(MotionEvent.AXIS_X, InputDevice.SOURCE_TOUCHPAD);
+            context.touchpadYRange = eventDevice.getMotionRange(MotionEvent.AXIS_Y, InputDevice.SOURCE_TOUCHPAD);
+            context.touchpadPressureRange = eventDevice.getMotionRange(MotionEvent.AXIS_PRESSURE, InputDevice.SOURCE_TOUCHPAD);
+        }
+
         // If we don't have X and Y ranges, we can't process this event
         if (context.touchpadXRange == null || context.touchpadYRange == null) {
             return false;
